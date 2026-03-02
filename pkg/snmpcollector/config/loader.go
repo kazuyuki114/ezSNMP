@@ -11,7 +11,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -115,8 +117,11 @@ func Load(paths Paths, logger *slog.Logger) (*LoadedConfig, error) {
 		errs = append(errs, err.Error())
 	}
 
-	// 4. Object definitions ——————————————————————————————————————————————————
-	objDefs, err := loadObjectDefs(paths.Objects, logger)
+	// 4. Object definitions (only those referenced by the resolved chain) ————
+	needed := resolveNeededObjects(devices, dgroups, ogroups)
+	logger.Info("config: resolved needed object keys from device→group→object chain", "needed", len(needed))
+
+	objDefs, err := loadObjectDefs(paths.Objects, needed, logger)
 	if err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -157,6 +162,10 @@ func loadDevices(dir string, logger *slog.Logger) (map[string]DeviceConfig, erro
 	for _, path := range files {
 		var raw map[string]rawDeviceEntry
 		if err := decodeFile(path, &raw); err != nil {
+			if errors.Is(err, errEmptyFile) {
+				logger.Debug("config: skip empty device file", "file", path)
+				continue
+			}
 			logger.Warn("config: skip malformed device file", "file", path, "error", err.Error())
 			continue
 		}
@@ -237,6 +246,10 @@ func loadDeviceGroups(dir string, logger *slog.Logger) (map[string]DeviceGroup, 
 	for _, path := range files {
 		var raw rawDeviceGroupFile
 		if err := decodeFile(path, &raw); err != nil {
+			if errors.Is(err, errEmptyFile) {
+				logger.Debug("config: skip empty device_group file", "file", path)
+				continue
+			}
 			logger.Warn("config: skip malformed device_group file", "file", path, "error", err.Error())
 			continue
 		}
@@ -269,6 +282,10 @@ func loadObjectGroups(dir string, logger *slog.Logger) (map[string]ObjectGroup, 
 	for _, path := range files {
 		var raw rawObjectGroupFile
 		if err := decodeFile(path, &raw); err != nil {
+			if errors.Is(err, errEmptyFile) {
+				logger.Debug("config: skip empty object_group file", "file", path)
+				continue
+			}
 			logger.Warn("config: skip malformed object_group file", "file", path, "error", err.Error())
 			continue
 		}
@@ -317,7 +334,41 @@ type rawOverride struct {
 	Attribute string `yaml:"attribute"`
 }
 
-func loadObjectDefs(dir string, logger *slog.Logger) (map[string]models.ObjectDefinition, error) {
+// resolveNeededObjects walks devices → device_groups → object_groups and
+// returns the set of object keys that are actually referenced. Only these
+// keys need to be loaded from the objects directory, saving memory and
+// startup time when the objects tree is large.
+func resolveNeededObjects(
+	devices map[string]DeviceConfig,
+	dgroups map[string]DeviceGroup,
+	ogroups map[string]ObjectGroup,
+) map[string]bool {
+	needed := make(map[string]bool)
+	for _, dev := range devices {
+		for _, dgName := range dev.DeviceGroups {
+			dg, ok := dgroups[dgName]
+			if !ok {
+				continue
+			}
+			for _, ogName := range dg.ObjectGroups {
+				og, ok := ogroups[ogName]
+				if !ok {
+					continue
+				}
+				for _, objKey := range og.Objects {
+					needed[objKey] = true
+				}
+			}
+		}
+	}
+	return needed
+}
+
+// loadObjectDefs loads object definition YAML files from dir.
+// When needed is non-nil and non-empty, only object keys present in the set
+// are kept — all others are discarded after parsing. When needed is nil the
+// function loads everything (backwards-compatible behaviour).
+func loadObjectDefs(dir string, needed map[string]bool, logger *slog.Logger) (map[string]models.ObjectDefinition, error) {
 	result := make(map[string]models.ObjectDefinition)
 	files, err := yamlFiles(dir)
 	if err != nil {
@@ -327,16 +378,34 @@ func loadObjectDefs(dir string, logger *slog.Logger) (map[string]models.ObjectDe
 		return result, fmt.Errorf("list objects dir %q: %w", dir, err)
 	}
 
+	filterEnabled := len(needed) > 0
+	var skipped int
+
 	for _, path := range files {
 		var raw rawObjectFile
 		if err := decodeFile(path, &raw); err != nil {
+			if errors.Is(err, errEmptyFile) {
+				logger.Debug("config: skip empty object file", "file", path)
+				continue
+			}
 			logger.Warn("config: skip malformed object file", "file", path, "error", err.Error())
 			continue
 		}
 		for key, body := range raw {
+			if filterEnabled && !needed[key] {
+				skipped++
+				continue
+			}
 			result[key] = convertObjectDef(key, body)
 		}
 		logger.Debug("config: loaded objects file", "file", path, "count", len(raw))
+	}
+
+	if filterEnabled {
+		logger.Info("config: object filter applied",
+			"kept", len(result),
+			"skipped", skipped,
+		)
 	}
 	return result, nil
 }
@@ -420,6 +489,10 @@ func loadEnums(dir string, objectDefs map[string]models.ObjectDefinition, logger
 		// Unmarshal as map[string]interface{} so we can type-switch the values.
 		var raw map[string]interface{}
 		if err := decodeFile(path, &raw); err != nil {
+			if errors.Is(err, errEmptyFile) {
+				logger.Debug("config: skip empty enum file", "file", path)
+				continue
+			}
 			logger.Warn("config: skip malformed enum file", "file", path, "error", err.Error())
 			continue
 		}
@@ -510,7 +583,12 @@ func yamlFiles(dir string) ([]string, error) {
 	return paths, err
 }
 
+// errEmptyFile is returned by decodeFile when a YAML file contains no data
+// (empty or comment-only). Callers should silently skip such files.
+var errEmptyFile = errors.New("config: empty or comment-only YAML file")
+
 // decodeFile opens path and unmarshals the YAML content into out.
+// Returns errEmptyFile when the file is empty or contains only comments.
 func decodeFile(path string, out interface{}) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -519,7 +597,13 @@ func decodeFile(path string, out interface{}) error {
 	defer f.Close()
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(false) // be lenient — extra keys are fine
-	return dec.Decode(out)
+	if err := dec.Decode(out); err != nil {
+		if errors.Is(err, io.EOF) {
+			return errEmptyFile
+		}
+		return err
+	}
+	return nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

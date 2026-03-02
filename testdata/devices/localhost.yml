@@ -1,7 +1,7 @@
 myswitch.lab:
   ip: 127.0.0.1
   port: 161
-  poll_interval: 30
+  poll_interval: 300
   timeout: 3000
   retries: 2
   version: 2c

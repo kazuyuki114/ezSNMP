@@ -1,3 +1,4 @@
 snmpcollector
 *.log
 *.json
+*.txt

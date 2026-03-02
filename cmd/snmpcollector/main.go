@@ -16,6 +16,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -25,6 +26,7 @@ import (
 	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/app"
 	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/config"
 	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/poller"
+	filetransport "github.com/kazuyuki114/ezSNMP/plugin/transport/file"
 )
 
 func main() {
@@ -50,6 +52,11 @@ func run() error {
 		poolMaxIdle int
 		poolIdleSec int
 
+		// Output file transport.
+		outputFile       string
+		outputMaxBytes   int64
+		outputMaxBackups int
+
 		// Config path overrides (defaults read from env).
 		cfgDevices      string
 		cfgDeviceGroups string
@@ -69,6 +76,10 @@ func run() error {
 	flag.IntVar(&poolMaxIdle, "snmp.pool.max.idle", 2, "Max idle connections per device")
 	flag.IntVar(&poolIdleSec, "snmp.pool.idle.timeout", 30, "Idle connection timeout in seconds")
 
+	flag.StringVar(&outputFile, "output.file", "", "Write metrics to file instead of stdout (enables rotation)")
+	flag.Int64Var(&outputMaxBytes, "output.file.max-bytes", 50*1024*1024, "Rotate file when it exceeds this size in bytes (default 50MB)")
+	flag.IntVar(&outputMaxBackups, "output.file.max-backups", 5, "Number of rotated backup files to keep (0=keep all)")
+
 	flag.StringVar(&cfgDevices, "config.devices", "", "Override INPUT_SNMP_DEVICE_DEFINITIONS_DIRECTORY_PATH")
 	flag.StringVar(&cfgDeviceGroups, "config.device.groups", "", "Override INPUT_SNMP_DEVICE_GROUP_DEFINITIONS_DIRECTORY_PATH")
 	flag.StringVar(&cfgObjectGroups, "config.object.groups", "", "Override INPUT_SNMP_OBJECT_GROUP_DEFINITIONS_DIRECTORY_PATH")
@@ -87,6 +98,28 @@ func run() error {
 	paths := config.PathsFromEnv()
 	applyPathOverrides(&paths, cfgDevices, cfgDeviceGroups, cfgObjectGroups, cfgObjects, cfgEnums)
 
+	// ── Output writer ────────────────────────────────────────────────────
+	var transportCloser func()
+	var transportWriter io.Writer
+
+	if outputFile != "" {
+		rf, err := filetransport.NewRotatingFile(filetransport.RotateConfig{
+			FilePath:   outputFile,
+			MaxBytes:   outputMaxBytes,
+			MaxBackups: outputMaxBackups,
+		}, logger)
+		if err != nil {
+			return fmt.Errorf("output file: %w", err)
+		}
+		transportWriter = rf
+		transportCloser = func() { rf.Close() }
+		logger.Info("output: writing metrics to file",
+			"path", outputFile,
+			"max_bytes", outputMaxBytes,
+			"max_backups", outputMaxBackups,
+		)
+	}
+
 	// ── Build App ────────────────────────────────────────────────────────
 	cfg := app.Config{
 		ConfigPaths:         paths,
@@ -100,6 +133,7 @@ func run() error {
 			MaxIdlePerDevice: poolMaxIdle,
 			IdleTimeout:      secondsToDuration(poolIdleSec),
 		},
+		TransportWriter: transportWriter,
 	}
 
 	application := app.New(cfg, logger)
@@ -119,6 +153,9 @@ func run() error {
 	logger.Info("snmpcollector: received shutdown signal")
 
 	application.Stop()
+	if transportCloser != nil {
+		transportCloser()
+	}
 	return nil
 }
 
