@@ -22,9 +22,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/app"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/config"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/poller"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/app"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/config"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/poller"
 )
 
 func main() {

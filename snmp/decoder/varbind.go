@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/gosnmp/gosnmp"
-	"github.com/vpbank/snmp_collector/models"
+	"github.com/kazuyuki114/ezSNMP/models"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

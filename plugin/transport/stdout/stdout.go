@@ -12,7 +12,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/vpbank/snmp_collector/plugin"
+	"github.com/kazuyuki114/ezSNMP/plugin"
 )
 
 // compile-time interface check.

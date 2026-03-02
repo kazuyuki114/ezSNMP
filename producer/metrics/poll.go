@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vpbank/snmp_collector/models"
-	"github.com/vpbank/snmp_collector/snmp/decoder"
+	"github.com/kazuyuki114/ezSNMP/models"
+	"github.com/kazuyuki114/ezSNMP/snmp/decoder"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

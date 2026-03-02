@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gosnmp/gosnmp"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/config"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/config"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

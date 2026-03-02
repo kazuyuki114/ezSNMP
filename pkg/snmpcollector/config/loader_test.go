@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/config"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/config"
 )
 
 func tmpDir(t *testing.T, files map[string]string) string {

@@ -19,12 +19,12 @@ import (
 	"os"
 	"sync"
 
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/config"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/poller"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/scheduler"
-	"github.com/vpbank/snmp_collector/plugin"
-	"github.com/vpbank/snmp_collector/producer/metrics"
-	"github.com/vpbank/snmp_collector/snmp/decoder"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/config"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/poller"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/scheduler"
+	"github.com/kazuyuki114/ezSNMP/plugin"
+	"github.com/kazuyuki114/ezSNMP/producer/metrics"
+	"github.com/kazuyuki114/ezSNMP/snmp/decoder"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

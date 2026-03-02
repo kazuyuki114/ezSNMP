@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vpbank/snmp_collector/models"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/config"
+	"github.com/kazuyuki114/ezSNMP/models"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/config"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

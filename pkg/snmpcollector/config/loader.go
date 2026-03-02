@@ -21,8 +21,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/vpbank/snmp_collector/models"
-	"github.com/vpbank/snmp_collector/producer/metrics"
+	"github.com/kazuyuki114/ezSNMP/models"
+	"github.com/kazuyuki114/ezSNMP/producer/metrics"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	fmtjson "github.com/vpbank/snmp_collector/format/json"
-	"github.com/vpbank/snmp_collector/models"
+	fmtjson "github.com/kazuyuki114/ezSNMP/format/json"
+	"github.com/kazuyuki114/ezSNMP/models"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

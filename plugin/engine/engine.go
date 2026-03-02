@@ -22,8 +22,8 @@ import (
 	"os"
 	"sync"
 
-	jsonformat "github.com/vpbank/snmp_collector/format/json"
-	"github.com/vpbank/snmp_collector/plugin"
+	jsonformat "github.com/kazuyuki114/ezSNMP/format/json"
+	"github.com/kazuyuki114/ezSNMP/plugin"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

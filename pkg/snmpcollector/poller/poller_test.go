@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/gosnmp/gosnmp"
-	"github.com/vpbank/snmp_collector/models"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/config"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/poller"
-	"github.com/vpbank/snmp_collector/snmp/decoder"
+	"github.com/kazuyuki114/ezSNMP/models"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/config"
+	"github.com/kazuyuki114/ezSNMP/pkg/snmpcollector/poller"
+	"github.com/kazuyuki114/ezSNMP/snmp/decoder"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

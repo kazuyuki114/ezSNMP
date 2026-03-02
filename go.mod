@@ -1,4 +1,4 @@
-module github.com/vpbank/snmp_collector
+module github.com/kazuyuki114/ezSNMP
 
 go 1.25.7
 
