@@ -1,12 +1,11 @@
-// Package file — rotate.go provides size-based file rotation for transport
-// output files.
+// rotate.go — size-based file rotation for the File transport plugin.
 //
-// When Maximum bytes have been written to the active file it is renamed with a
+// When MaxBytes have been written to the active file it is renamed with a
 // numeric suffix (e.g. metrics.json → metrics.json.1) and a fresh file is
 // opened.  Up to MaxBackups old files are kept; older ones are removed.
 //
-// RotatingFile satisfies io.Writer and io.Closer so it can be used directly as
-// the Writer field of Config or SplitConfig.
+// RotatingFile satisfies io.Writer and io.Closer so it can be used directly
+// as the underlying writer for Transport.Send.
 package file
 
 import (
@@ -53,7 +52,7 @@ type RotatingFile struct {
 // RotatingFile writer.  The caller must call Close when finished.
 func NewRotatingFile(cfg RotateConfig, logger *slog.Logger) (*RotatingFile, error) {
 	if cfg.FilePath == "" {
-		return nil, fmt.Errorf("transport/file: rotate: FilePath is required")
+		return nil, fmt.Errorf("file transport: rotate: FilePath is required")
 	}
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(noopWriter{}, nil))
@@ -62,7 +61,7 @@ func NewRotatingFile(cfg RotateConfig, logger *slog.Logger) (*RotatingFile, erro
 	// Ensure parent directory exists.
 	dir := filepath.Dir(cfg.FilePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("transport/file: rotate: mkdir %s: %w", dir, err)
+		return nil, fmt.Errorf("file transport: rotate: mkdir %s: %w", dir, err)
 	}
 
 	rf := &RotatingFile{
@@ -83,7 +82,7 @@ func (rf *RotatingFile) Write(p []byte) (int, error) {
 	// Check if rotation is needed before writing.
 	if rf.cfg.MaxBytes > 0 && rf.size+int64(len(p)) > rf.cfg.MaxBytes {
 		if err := rf.rotate(); err != nil {
-			rf.logger.Error("transport/file: rotate failed", "error", err.Error())
+			rf.logger.Error("file transport: rotate failed", "error", err.Error())
 			// Continue writing to the current file rather than losing data.
 		}
 	}
@@ -112,12 +111,12 @@ func (rf *RotatingFile) Close() error {
 func (rf *RotatingFile) openFile() error {
 	f, err := os.OpenFile(rf.cfg.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return fmt.Errorf("transport/file: rotate: open %s: %w", rf.cfg.FilePath, err)
+		return fmt.Errorf("file transport: rotate: open %s: %w", rf.cfg.FilePath, err)
 	}
 	info, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return fmt.Errorf("transport/file: rotate: stat %s: %w", rf.cfg.FilePath, err)
+		return fmt.Errorf("file transport: rotate: stat %s: %w", rf.cfg.FilePath, err)
 	}
 	rf.file = f
 	rf.size = info.Size()
@@ -136,7 +135,7 @@ func (rf *RotatingFile) rotate() error {
 	// Close current file.
 	if rf.file != nil {
 		if err := rf.file.Close(); err != nil {
-			rf.logger.Warn("transport/file: rotate: close error", "error", err.Error())
+			rf.logger.Warn("file transport: rotate: close error", "error", err.Error())
 		}
 		rf.file = nil
 	}
@@ -164,7 +163,7 @@ func (rf *RotatingFile) rotate() error {
 
 	// Rename active file → .1
 	if err := os.Rename(base, base+".1"); err != nil && !os.IsNotExist(err) {
-		rf.logger.Warn("transport/file: rotate: rename error", "error", err.Error())
+		rf.logger.Warn("file transport: rotate: rename error", "error", err.Error())
 	}
 
 	// Prune excess backups when MaxBackups > 0.
@@ -172,7 +171,7 @@ func (rf *RotatingFile) rotate() error {
 		rf.prune()
 	}
 
-	rf.logger.Info("transport/file: rotated", "file", base)
+	rf.logger.Info("file transport: rotated", "file", base)
 
 	// Open a fresh file.
 	rf.size = 0
@@ -201,6 +200,6 @@ func (rf *RotatingFile) prune() {
 		if err := os.Remove(name); err != nil {
 			break // no more files
 		}
-		rf.logger.Debug("transport/file: pruned old backup", "file", name)
+		rf.logger.Debug("file transport: pruned old backup", "file", name)
 	}
 }

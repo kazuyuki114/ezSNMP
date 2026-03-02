@@ -85,42 +85,9 @@ Operational metadata attached to every `SNMPMetric`. Used to monitor collector h
 
 | JSON field | Go field | Type | Notes |
 |---|---|---|---|
-| `collector_id` | `CollectorID` | `string` | From `-metrics.addr` config, identifies collector instance |
+| `collector_id` | `CollectorID` | `string` | From `-collector.id` config, identifies collector instance |
 | `poll_duration_ms` | `PollDurationMs` | `int64` | Round-trip SNMP request latency |
 | `poll_status` | `PollStatus` | `string` | `"success"`, `"timeout"`, or `"error"` |
-
----
-
-### `SNMPTrap`
-
-Top-level payload for a received SNMP trap or inform notification.
-
-```go
-type SNMPTrap struct {
-    Timestamp time.Time `json:"timestamp"`
-    Device    Device    `json:"device"`
-    TrapInfo  TrapInfo  `json:"trap_info"`
-    Varbinds  []Metric  `json:"varbinds"`
-}
-```
-
-`Varbinds` reuses `[]Metric` — the same `Name`, `Value`, `Type` fields apply. `Metric.Tags` and `Metric.Instance` are typically empty for trap varbinds.
-
----
-
-### `TrapInfo`
-
-Trap-specific header fields. Some fields are version-specific.
-
-| JSON field | Go field | Type | Present in |
-|---|---|---|---|
-| `version` | `Version` | `string` | All — `"v1"`, `"v2c"`, `"v3"` |
-| `enterprise_oid` | `EnterpriseOID` | `string` | v1 only |
-| `generic_trap` | `GenericTrap` | `int32` | v1 only (0–6) |
-| `specific_trap` | `SpecificTrap` | `int32` | v1 only |
-| `trap_oid` | `TrapOID` | `string` | v2c / v3 — `SNMPv2-MIB::snmpTrapOID.0` value |
-| `trap_name` | `TrapName` | `string` | All — resolved MIB name, e.g. `"linkDown"` |
-| `severity` | `Severity` | `string` | All — `"info"`, `"warning"`, `"critical"` |
 
 ---
 

@@ -452,19 +452,15 @@ transport/elasticsearch/
 └── template.go          # Index templates
 ```
 
-**`transport/file/`** - File/Stdout Output
+**`plugin/transport/file/`** - File/Stdout Output (Self-contained)
 ```go
-transport/file/
-├── writer.go            # Single-destination file/stdout writer
-├── split.go             # Split writer: metrics → file A, traps → file B
+plugin/transport/file/
+├── file.go              # File Transport plugin (plugin.Transport)
 └── rotate.go            # Size-based file rotation (io.WriteCloser)
 ```
 
 Features:
-- **WriterTransport**: Simple single-destination writer (default: stdout)
-- **SplitWriterTransport**: Routes SNMP poll metrics and trap events to separate files
-  - Zero-alloc routing via `bytes.Contains` marker detection (`"trap_info"`)
-  - Separate mutexes per destination for concurrent writes without cross-path contention
+- **File Transport plugin**: Writes formatted JSON to rotating files
 - **RotatingFile**: Size-based file rotation with configurable backup retention
   - Numbered backup scheme: `metrics.json` → `metrics.json.1` → `metrics.json.2`
   - Automatic parent directory creation

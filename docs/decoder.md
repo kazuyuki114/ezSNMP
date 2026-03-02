@@ -28,7 +28,7 @@ snmp/decoder/
 
 ```
 models/
-├── metric.go     # SNMPMetric, Device, Metric, MetricMetadata, SNMPTrap, TrapInfo
+├── metric.go     # SNMPMetric, Device, Metric, MetricMetadata
 └── config.go     # ObjectDefinition, AttributeDefinition, IndexDefinition, OverrideReference
 ```
 
@@ -349,4 +349,4 @@ result, err := dec.Decode(raw)
 | Augmentation merging (`augments:` field) | Producer |
 | `overrides:` resolution (64-bit over 32-bit) | Producer |
 | JSON serialisation | Formatter — `format/json/` |
-| Kafka delivery | Transport — `transport/kafka/` |
+| File / stdout delivery | Transport — `plugin/transport/file/`, `plugin/transport/stdout/` |

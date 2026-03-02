@@ -101,9 +101,6 @@ func TestNew_defaults(t *testing.T) {
 	if a.cfg.BufferSize != 10_000 {
 		t.Errorf("BufferSize = %d, want 10000", a.cfg.BufferSize)
 	}
-	if a.cfg.TrapListenAddr != "0.0.0.0:162" {
-		t.Errorf("TrapListenAddr = %q, want 0.0.0.0:162", a.cfg.TrapListenAddr)
-	}
 	if a.cfg.CollectorID == "" {
 		t.Error("CollectorID should default to hostname, got empty")
 	}
@@ -163,26 +160,6 @@ func TestStartStop_lifecycle(t *testing.T) {
 	a.Stop()
 
 	// If we get here without hanging, the lifecycle is correct.
-}
-
-func TestStartStop_withTrapDisabled(t *testing.T) {
-	paths := writeTestConfig(t)
-
-	a := New(Config{
-		ConfigPaths:   paths,
-		PollerWorkers: 1,
-		BufferSize:    10,
-		TrapEnabled:   false,
-	}, nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	err := a.Start(ctx)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	cancel()
-	a.Stop()
 }
 
 func TestReload(t *testing.T) {

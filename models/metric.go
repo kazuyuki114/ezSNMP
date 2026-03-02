@@ -21,7 +21,7 @@ type SNMPMetric struct {
 type Device struct {
 	Hostname    string            `json:"hostname"`
 	IPAddress   string            `json:"ip_address"`
-	SNMPVersion string            `json:"snmp_version"`           // "1", "2c", or "3"
+	SNMPVersion string            `json:"snmp_version"` // "1", "2c", or "3"
 	Vendor      string            `json:"vendor,omitempty"`
 	Model       string            `json:"model,omitempty"`
 	SysDescr    string            `json:"sys_descr,omitempty"`
@@ -49,23 +49,4 @@ type MetricMetadata struct {
 	CollectorID    string `json:"collector_id"`
 	PollDurationMs int64  `json:"poll_duration_ms"`
 	PollStatus     string `json:"poll_status"` // "success" | "timeout" | "error"
-}
-
-// SNMPTrap is the top-level payload for a received SNMP trap or inform.
-type SNMPTrap struct {
-	Timestamp time.Time `json:"timestamp"`
-	Device    Device    `json:"device"`
-	TrapInfo  TrapInfo  `json:"trap_info"`
-	Varbinds  []Metric  `json:"varbinds"`
-}
-
-// TrapInfo carries trap-specific header fields that are not present in regular polls.
-type TrapInfo struct {
-	Version       string `json:"version"`                  // "v1", "v2c", "v3"
-	EnterpriseOID string `json:"enterprise_oid,omitempty"` // v1 only
-	GenericTrap   int32  `json:"generic_trap,omitempty"`   // v1 only (0–6)
-	SpecificTrap  int32  `json:"specific_trap,omitempty"`  // v1 only
-	TrapOID       string `json:"trap_oid"`                 // v2c / v3 SNMPv2-MIB::snmpTrapOID.0
-	TrapName      string `json:"trap_name,omitempty"`      // Resolved MIB name, e.g. "linkDown"
-	Severity      string `json:"severity,omitempty"`       // "info" | "warning" | "critical"
 }

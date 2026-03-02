@@ -13,7 +13,7 @@ producer/metrics [Stage 4]
 format/json.JSONFormatter [Stage 5]
      │  []byte  (JSON)
      ▼
-transport/kafka [Stage 6]
+plugin/transport/* [Stage 6]
 ```
 
 JSON is the **primary and currently only implemented output format**. The package is
@@ -170,8 +170,7 @@ fmt.Println(string(data))
 
 `JSONFormatter` is **stateless** after construction — all fields are immutable. It is
 safe to call `Format` from any number of concurrent goroutines without additional
-synchronisation. 50 formatter workers (as specified by `-pipeline.formatter.workers=50`)
-can share a single `JSONFormatter` instance.
+synchronisation.
 
 ---
 

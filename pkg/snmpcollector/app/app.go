@@ -1,22 +1,14 @@
 // Package app wires the SNMP Collector pipeline stages together and manages
 // their lifecycle.
 //
-// Poll path:
+// Pipeline:
 //
 //	Scheduler → WorkerPool → [rawCh] → Decoder → [decodedCh] →
 //	Producer → [metricCh] → Formatter → [formattedCh] → Transport
-//
-// Trap path (parallel):
-//
-//	TrapReceiver → [trapCh] → JSON marshal → [formattedCh] → Transport
-//
-// Both paths converge on a shared formattedCh so that a single transport
-// goroutine writes all output.
 package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,10 +20,8 @@ import (
 	"github.com/vpbank/snmp_collector/pkg/snmpcollector/config"
 	"github.com/vpbank/snmp_collector/pkg/snmpcollector/poller"
 	"github.com/vpbank/snmp_collector/pkg/snmpcollector/scheduler"
-	"github.com/vpbank/snmp_collector/pkg/snmpcollector/trapreceiver"
 	"github.com/vpbank/snmp_collector/producer/metrics"
 	"github.com/vpbank/snmp_collector/snmp/decoder"
-	filetransport "github.com/vpbank/snmp_collector/transport/file"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,13 +50,6 @@ type Config struct {
 	// PoolOptions configures the SNMP connection pool.
 	PoolOptions poller.PoolOptions
 
-	// TrapEnabled controls whether the trap receiver starts.
-	TrapEnabled bool
-
-	// TrapListenAddr is the UDP address for trap reception.
-	// Default: "0.0.0.0:162".
-	TrapListenAddr string
-
 	// EnumEnabled mirrors PROCESSOR_SNMP_ENUM_ENABLE.
 	EnumEnabled bool
 
@@ -77,28 +60,7 @@ type Config struct {
 	PrettyPrint bool
 
 	// TransportWriter is the io.Writer for file transport. nil = os.Stdout.
-	// Ignored when SplitFile is true.
 	TransportWriter io.Writer
-
-	// SplitFile enables the split-file transport: SNMP poll metrics go to
-	// MetricFilePath and traps go to TrapFilePath.
-	SplitFile bool
-
-	// MetricFilePath is the output file for SNMP poll metrics.
-	// Required when SplitFile is true.
-	MetricFilePath string
-
-	// TrapFilePath is the output file for SNMP trap events.
-	// Required when SplitFile is true.
-	TrapFilePath string
-
-	// FileMaxBytes triggers file rotation when the active file exceeds this
-	// size. Zero disables rotation. Only used when SplitFile is true.
-	FileMaxBytes int64
-
-	// FileMaxBackups is the number of rotated files to keep per output file.
-	// Zero keeps all. Only used when SplitFile is true.
-	FileMaxBackups int
 }
 
 func (c *Config) withDefaults() {
@@ -114,9 +76,6 @@ func (c *Config) withDefaults() {
 	}
 	if c.BufferSize <= 0 {
 		c.BufferSize = 10_000
-	}
-	if c.TrapListenAddr == "" {
-		c.TrapListenAddr = "0.0.0.0:162"
 	}
 }
 
@@ -134,15 +93,14 @@ type App struct {
 	loadedCfg *config.LoadedConfig
 
 	// Pipeline components.
-	connPool     *poller.ConnectionPool
-	snmpPoller   *poller.SNMPPoller
-	workerPool   *poller.WorkerPool
-	sched        *scheduler.Scheduler
-	trapReceiver *trapreceiver.TrapReceiver
-	dec          *decoder.SNMPDecoder
-	prod         *metrics.MetricsProducer
-	formatter    *jsonformat.JSONFormatter
-	transport    filetransport.Transport
+	connPool   *poller.ConnectionPool
+	snmpPoller *poller.SNMPPoller
+	workerPool *poller.WorkerPool
+	sched      *scheduler.Scheduler
+	dec        *decoder.SNMPDecoder
+	prod       *metrics.MetricsProducer
+	formatter  *jsonformat.JSONFormatter
+	transport  *writerTransport
 
 	// Inter-stage channels.
 	rawCh       chan decoder.RawPollResult
@@ -151,9 +109,8 @@ type App struct {
 	formattedCh chan []byte
 
 	// Lifecycle.
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup // tracks pipeline goroutines
-	formatWg sync.WaitGroup // tracks formatters feeding formattedCh
+	cancel context.CancelFunc
+	wg     sync.WaitGroup // tracks pipeline goroutines
 }
 
 // New constructs an App. It does not start anything — call Start for that.
@@ -170,7 +127,7 @@ func New(cfg Config, logger *slog.Logger) *App {
 
 // Start loads configuration, constructs all pipeline stages, and launches the
 // goroutines that connect them. It returns an error if configuration loading
-// or trap listener binding fails.
+// fails.
 //
 // The caller must eventually call Stop (or cancel the passed-in context's
 // parent) to release resources.
@@ -194,17 +151,7 @@ func (a *App) Start(ctx context.Context) error {
 	a.formattedCh = make(chan []byte, a.cfg.BufferSize)
 
 	// ── 3. Build pipeline components (reverse order: transport → decoder) ──
-	if a.cfg.SplitFile {
-		transport, err := a.buildSplitTransport()
-		if err != nil {
-			return fmt.Errorf("app: build split transport: %w", err)
-		}
-		a.transport = transport
-	} else {
-		a.transport = filetransport.New(filetransport.Config{
-			Writer: a.cfg.TransportWriter,
-		}, a.logger)
-	}
+	a.transport = newWriterTransport(a.cfg.TransportWriter, a.logger)
 
 	a.formatter = jsonformat.New(jsonformat.Config{
 		PrettyPrint: a.cfg.PrettyPrint,
@@ -229,45 +176,13 @@ func (a *App) Start(ctx context.Context) error {
 	pipeCtx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 
-	// ── 5. Optionally start trap receiver (must know before formatWg count) ──
-	trapStarted := false
-	if a.cfg.TrapEnabled {
-		a.trapReceiver = trapreceiver.New(trapreceiver.Config{
-			ListenAddr: a.cfg.TrapListenAddr,
-		}, a.logger)
-		if err := a.trapReceiver.Start(pipeCtx); err != nil {
-			// Non-fatal: log and continue without traps.
-			a.logger.Error("app: trap receiver failed to start — continuing without traps",
-				"error", err.Error(),
-			)
-			a.trapReceiver = nil
-		} else {
-			trapStarted = true
-			a.logger.Info("app: trap receiver started", "addr", a.cfg.TrapListenAddr)
-		}
-	}
-
-	// ── 6. Pre-count formatter goroutines BEFORE starting the transport ──
-	// formatWg gates the close of formattedCh. All Add() calls must happen
-	// before the transport stage launches its formatWg.Wait() goroutine,
-	// otherwise Wait() can return while the count is still 0 and close
-	// formattedCh before the formatters have started.
-	numFormatters := 1 // poll path formatter always present
-	if trapStarted {
-		numFormatters++
-	}
-	a.formatWg.Add(numFormatters)
-
-	// ── 7. Start pipeline goroutines (transport first, sources last) ─────
+	// ── 5. Start pipeline goroutines (transport first, sources last) ─────
 	a.startTransportStage(pipeCtx)
 	a.startFormatStage(pipeCtx)
-	if trapStarted {
-		a.startTrapFormatStage(pipeCtx)
-	}
 	a.startProduceStage(pipeCtx)
 	a.startDecodeStage(pipeCtx)
 
-	// ── 8. Start poller path ────────────────────────────────────────────
+	// ── 6. Start poller path ────────────────────────────────────────────
 	a.workerPool.Start(pipeCtx)
 
 	// Scheduler blocks in its own goroutine.
@@ -281,7 +196,6 @@ func (a *App) Start(ctx context.Context) error {
 	a.logger.Info("app: pipeline running",
 		"poller_workers", a.cfg.PollerWorkers,
 		"buffer_size", a.cfg.BufferSize,
-		"trap_enabled", a.cfg.TrapEnabled,
 	)
 	return nil
 }
@@ -293,8 +207,8 @@ func (a *App) Start(ctx context.Context) error {
 //  2. Wait for the scheduler goroutine to exit.
 //  3. Drain the worker pool (waits for in-flight polls to complete).
 //  4. Close rawCh → decoder drains → closes decodedCh → producer drains →
-//     closes metricCh → formatter drains. Trap formatter also finishes.
-//  5. Close formattedCh → transport goroutine drains → exits.
+//     closes metricCh → formatter drains → closes formattedCh.
+//  5. Transport goroutine drains formattedCh → exits.
 //  6. Close transport and connection pool.
 func (a *App) Stop() {
 	a.logger.Info("app: shutting down")
@@ -319,15 +233,10 @@ func (a *App) Stop() {
 		close(a.rawCh)
 	}
 
-	// 5. Stop the trap receiver (closes its output channel).
-	if a.trapReceiver != nil {
-		a.trapReceiver.Stop()
-	}
-
-	// 6. Wait for all pipeline goroutines to drain.
+	// 5. Wait for all pipeline goroutines to drain.
 	a.wg.Wait()
 
-	// 7. Release resources.
+	// 6. Release resources.
 	if a.transport != nil {
 		if err := a.transport.Close(); err != nil {
 			a.logger.Error("app: transport close error", "error", err.Error())
@@ -422,13 +331,13 @@ func (a *App) startProduceStage(_ context.Context) {
 }
 
 // startFormatStage reads SNMPMetric from metricCh, formats to JSON, and sends
-// to formattedCh. formatWg must already be incremented by the caller before
-// this is called.
+// to formattedCh. When metricCh is closed it closes formattedCh to cascade
+// shutdown to the transport stage.
 func (a *App) startFormatStage(_ context.Context) {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		defer a.formatWg.Done()
+		defer close(a.formattedCh)
 
 		for metric := range a.metricCh {
 			data, err := a.formatter.Format(&metric)
@@ -444,40 +353,9 @@ func (a *App) startFormatStage(_ context.Context) {
 	}()
 }
 
-// startTrapFormatStage reads SNMPTrap from the trap receiver output channel,
-// marshals to JSON, and sends to the shared formattedCh. formatWg must already
-// be incremented by the caller before this is called.
-func (a *App) startTrapFormatStage(_ context.Context) {
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		defer a.formatWg.Done()
-
-		for trap := range a.trapReceiver.Output() {
-			data, err := json.Marshal(&trap)
-			if err != nil {
-				a.logger.Warn("app: trap format error",
-					"device", trap.Device.Hostname,
-					"trap_oid", trap.TrapInfo.TrapOID,
-					"error", err.Error(),
-				)
-				continue
-			}
-			a.formattedCh <- data
-		}
-	}()
-}
-
 // startTransportStage reads formatted bytes from formattedCh and writes them
-// via the transport. It also owns the goroutine that closes formattedCh after
-// all formatter goroutines finish.
+// via the transport.
 func (a *App) startTransportStage(_ context.Context) {
-	// Close formattedCh once all formatters are done.
-	go func() {
-		a.formatWg.Wait()
-		close(a.formattedCh)
-	}()
-
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -497,41 +375,44 @@ func (a *App) startTransportStage(_ context.Context) {
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-// buildSplitTransport creates a SplitWriterTransport backed by RotatingFile
-// instances for metrics and traps.
-func (a *App) buildSplitTransport() (filetransport.Transport, error) {
-	mrf, err := filetransport.NewRotatingFile(filetransport.RotateConfig{
-		FilePath:   a.cfg.MetricFilePath,
-		MaxBytes:   a.cfg.FileMaxBytes,
-		MaxBackups: a.cfg.FileMaxBackups,
-	}, a.logger)
-	if err != nil {
-		return nil, fmt.Errorf("metric file: %w", err)
-	}
-
-	trf, err := filetransport.NewRotatingFile(filetransport.RotateConfig{
-		FilePath:   a.cfg.TrapFilePath,
-		MaxBytes:   a.cfg.FileMaxBytes,
-		MaxBackups: a.cfg.FileMaxBackups,
-	}, a.logger)
-	if err != nil {
-		_ = mrf.Close()
-		return nil, fmt.Errorf("trap file: %w", err)
-	}
-
-	a.logger.Info("app: split file transport configured",
-		"metric_file", a.cfg.MetricFilePath,
-		"trap_file", a.cfg.TrapFilePath,
-		"max_bytes", a.cfg.FileMaxBytes,
-		"max_backups", a.cfg.FileMaxBackups,
-	)
-
-	return filetransport.NewSplit(filetransport.SplitConfig{
-		MetricWriter: mrf,
-		TrapWriter:   trf,
-	}, a.logger), nil
-}
-
 type noopWriter struct{}
 
 func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+// writerTransport is a minimal inline transport that writes each message
+// followed by a newline to an io.Writer (default: os.Stdout).  It keeps
+// app.go self-contained — no dependency on transport/file or plugin packages.
+type writerTransport struct {
+	mu     sync.Mutex
+	w      io.Writer
+	nl     []byte
+	logger *slog.Logger
+}
+
+func newWriterTransport(w io.Writer, logger *slog.Logger) *writerTransport {
+	if w == nil {
+		w = os.Stdout
+	}
+	return &writerTransport{
+		w:      w,
+		nl:     []byte("\n"),
+		logger: logger,
+	}
+}
+
+func (t *writerTransport) Send(data []byte) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if _, err := t.w.Write(data); err != nil {
+		t.logger.Error("app: transport write failed", "error", err.Error(), "bytes", len(data))
+		return fmt.Errorf("app: transport write: %w", err)
+	}
+	if _, err := t.w.Write(t.nl); err != nil {
+		t.logger.Error("app: transport newline write failed", "error", err.Error())
+		return fmt.Errorf("app: transport write newline: %w", err)
+	}
+	return nil
+}
+
+func (t *writerTransport) Close() error { return nil }
